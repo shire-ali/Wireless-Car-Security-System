@@ -1,0 +1,92 @@
+#include <SoftwareSerial.h>
+
+// SIM800L connection pins
+SoftwareSerial sim800l(10, 11); // RX, TX
+
+// Sensor pins
+const int pirPin = 7;          // PIR sensor pin
+const int sensorPin = 2;       // Reed switch pin
+const int ledPin = 13;         // LED pin for status indication
+
+// Phone number for SMS alerts
+const char* phoneNum = "+447440049497"; 
+
+void setup() {
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, LOW);  // Turn off LED initially
+
+  sim800l.begin(9600);
+  pinMode(pirPin, INPUT);        
+  pinMode(sensorPin, INPUT_PULLUP);  
+
+  if (!setupGSM()) {
+    for(int i = 0; i < 5; i++) {
+      digitalWrite(ledPin, HIGH);
+      delay(200);
+      digitalWrite(ledPin, LOW);
+      delay(200);
+    }
+    while(true);
+  } else {
+    digitalWrite(ledPin, HIGH);
+  }
+
+  // Stabilize initial sensor readings
+  delay(2000);  // Wait for sensors to stabilize
+  readInitialSensorStates();
+}
+
+void loop() {
+  checkMotion();
+  checkDoor();
+  delay(50);  // Slight delay to help with debouncing and reducing power usage
+}
+
+void readInitialSensorStates() {
+  // Read initial state multiple times to stabilize sensor readings
+  for (int i = 0; i < 5; i++) {
+    lastMotionState = digitalRead(pirPin);
+    doorWasClosed = digitalRead(sensorPin) == HIGH;
+    delay(10);
+  }
+}
+
+void checkMotion() {
+  int motionState = digitalRead(pirPin);
+  if (motionState == HIGH && lastMotionState == LOW) {
+    sendSMS("Alert: Motion Detected in your Car!");
+    lastMotionState = HIGH;
+    delay(20000); // Delay to avoid multiple SMS
+  } else if (motionState == LOW) {
+    lastMotionState = LOW;
+  }
+}
+
+void checkDoor() {
+  bool doorIsOpen = digitalRead(sensorPin) == LOW;
+  if (doorIsOpen && doorWasClosed) {
+    sendSMS("Alert: Door is open!");
+    doorWasClosed = false;
+  } else if (!doorIsOpen) {
+    doorWasClosed = true;
+  }
+}
+
+bool setupGSM() {
+  sim800l.println("AT");
+  delay(100);
+  sim800l.println("AT+CMGF=1");
+  delay(100);
+  sim800l.println("AT+CNMI=2,2,0,0,0");
+  delay(100);
+  return sim800l.available();
+}
+
+void sendSMS(const char* message) {
+  sim800l.println("AT+CMGS=\"" + String(phoneNum) + "\"");
+  delay(100);
+  sim800l.print(message);
+  delay(100);
+  sim800l.write(26); // ASCII code of CTRL+Z
+  delay(1000);
+}
